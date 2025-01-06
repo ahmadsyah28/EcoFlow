@@ -1,7 +1,47 @@
 import 'package:flutter/material.dart';
+import 'package:tflite/tflite.dart';
 
-class WaterQualityScreen extends StatelessWidget {
+class WaterQualityScreen extends StatefulWidget {
   const WaterQualityScreen({super.key});
+
+  @override
+  _WaterQualityScreenState createState() => _WaterQualityScreenState();
+}
+
+class _WaterQualityScreenState extends State<WaterQualityScreen> {
+  String _classificationResult = "Menunggu..."; // Default text
+
+  @override
+  void initState() {
+    super.initState();
+    loadModel();
+  }
+
+  // Fungsi untuk memuat model
+  Future<void> loadModel() async {
+    await Tflite.loadModel(
+      model: "assets/model.tflite",  // Model Anda
+      labels: "assets/labels.txt",   // File label Anda
+    );
+  }
+
+  // Fungsi untuk melakukan klasifikasi
+  Future<void> classifyWaterQuality(double ph, double tds, double turbidity) async {
+    var input = [ph, tds, turbidity]; // Sesuaikan dengan input model Anda
+    var output = await Tflite.runModelOnInput(
+      inputs: input,
+      outputs: [0, 1], // Misalnya model outputkan 0 atau 1
+    );
+
+    setState(() {
+      // Menentukan hasil klasifikasi berdasarkan output model
+      if (output != null && output.isNotEmpty) {
+        _classificationResult = output[0] == 0 ? "Air Jernih!" : "Air Kotor!";
+      } else {
+        _classificationResult = "Kesalahan dalam klasifikasi";
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,6 +117,26 @@ class WaterQualityScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 _buildTipsCard(),
+                // Bagian menampilkan hasil klasifikasi
+                const SizedBox(height: 30),
+                Center(
+                  child: Text(
+                    _classificationResult,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2196F3),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: () {
+                    // Memanggil fungsi klasifikasi dengan contoh data input
+                    classifyWaterQuality(7.0, 80.0, 5.0); // Sesuaikan input sesuai data sensor
+                  },
+                  child: const Text('Klasifikasikan Kualitas Air'),
+                ),
               ],
             ),
           ),
