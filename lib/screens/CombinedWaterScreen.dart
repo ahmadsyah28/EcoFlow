@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/bluetooth_service.dart';
+import 'parameter_detail_screen.dart';
 
 class CombinedWaterScreen extends StatefulWidget {
   const CombinedWaterScreen({super.key});
@@ -20,7 +21,8 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
   late Duration filterDuration;
   late WaterQualityBluetoothService bluetoothService;
   bool isLoading = true;
-  
+  DateTime lastUpdatedTime = DateTime.now();
+
   bool isConnected = false;
 
   static const double MAX_WATER_FLOW =
@@ -87,20 +89,21 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
   }
 
   // Ganti deklarasi bluetoothService
- void _setupBluetooth() {
-    bluetoothService = WaterQualityBluetoothService(  // Update nama class
+  void _setupBluetooth() {
+    bluetoothService = WaterQualityBluetoothService(
+      // Update nama class
       targetDeviceName: 'ESP32_Water_Quality',
       onDataReceived: _updateSensorData,
     );
     _connectBluetooth();
   }
 
-Future<void> _connectBluetooth() async {
-  await bluetoothService.connect();
-  setState(() {
-    isConnected = bluetoothService.isConnected();
-  });
-}
+  Future<void> _connectBluetooth() async {
+    await bluetoothService.connect();
+    setState(() {
+      isConnected = bluetoothService.isConnected();
+    });
+  }
 
   void _updateSensorData(Map<String, dynamic> data) {
     setState(() {
@@ -110,6 +113,8 @@ Future<void> _connectBluetooth() async {
           data['temperature']?.toDouble() ?? 25.0;
       waterParameters['Turbidity']?['value'] =
           data['turbidity']?.toDouble() ?? 2.5;
+
+      lastUpdatedTime = DateTime.now();
 
       // Update total water flow
       final newFlow = data['flow']?.toDouble() ?? 0.0;
@@ -320,17 +325,17 @@ Future<void> _connectBluetooth() async {
               children: [
                 _buildWaterQualityStatus(),
                 const SizedBox(height: 20),
-                _buildWaterFlowInfo(),
-                const SizedBox(height: 20),
                 _buildStatusCard(),
                 const SizedBox(height: 20),
-                _buildParametersGrid(),
+                _buildWaterFlowInfo(),
                 const SizedBox(height: 20),
+                // _buildParametersGrid(),
+                // const SizedBox(height: 20),
                 _buildDateInfoCard(),
                 const SizedBox(height: 20),
                 _buildMaintenanceCard(),
-                const SizedBox(height: 20),
-                _buildTipsCard(),
+                // const SizedBox(height: 20),
+                // _buildTipsCard(),
               ],
             ),
           ),
@@ -339,7 +344,7 @@ Future<void> _connectBluetooth() async {
     );
   }
 
-  Widget _buildWaterQualityStatus() {
+Widget _buildWaterQualityStatus() {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -359,9 +364,40 @@ Future<void> _connectBluetooth() async {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(10.0),
         child: Column(
           children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.access_time,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Update: ${DateFormat('dd MMM yyyy HH:mm').format(lastUpdatedTime)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Icon(
               isWaterSafe ? Icons.check_circle : Icons.warning,
               color: Colors.white,
@@ -386,9 +422,107 @@ Future<void> _connectBluetooth() async {
                 fontSize: 16,
               ),
             ),
+            const SizedBox(height: 16),
+            // Container untuk parameter
+            InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ParameterDetailScreen(
+                      waterParameters: waterParameters,
+                      lastUpdatedTime: lastUpdatedTime,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildParameterItem('pH', waterParameters['pH']!['value'].toString(), ''),
+                        _buildParameterItem('TDS', waterParameters['TDS']!['value'].toString(), 'ppm'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildParameterItem('Turbidity', waterParameters['Turbidity']!['value'].toString(), 'NTU'),
+                        _buildParameterItem('Suhu', waterParameters['Temperature']!['value'].toString(), '°C'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Text(
+                          'Tekan untuk detail lengkap',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: Colors.white70,
+                          size: 12,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }  // Tambahkan widget helper untuk parameter item
+  Widget _buildParameterItem(String label, String value, String unit) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (unit.isNotEmpty) ...[
+              const SizedBox(width: 2),
+              Text(
+                unit,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
     );
   }
 
@@ -603,153 +737,151 @@ Future<void> _connectBluetooth() async {
     );
   }
 
-  Widget _buildTipsCard() {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.blue.withOpacity(0.1),
-            spreadRadius: 2,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Padding(
-          padding: EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.tips_and_updates,
-                    color: Colors.amber,
-                    size: 24,
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Tips Perawatan',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1B1B1B),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 12),
-              Text(
-                'Pastikan untuk memeriksa kualitas air secara rutin dan lakukan penggantian filter sesuai jadwal untuk menjaga kualitas air tetap optimal.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF666666),
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  // Widget _buildTipsCard() {
+  //   return Container(
+  //     decoration: BoxDecoration(
+  //       borderRadius: BorderRadius.circular(16),
+  //       boxShadow: [
+  //         BoxShadow(
+  //           color: Colors.blue.withOpacity(0.1),
+  //           spreadRadius: 2,
+  //           blurRadius: 10,
+  //           offset: const Offset(0, 4),
+  //         ),
+  //       ],
+  //     ),
+  //     child: Card(
+  //       elevation: 0,
+  //       shape: RoundedRectangleBorder(
+  //         borderRadius: BorderRadius.circular(16),
+  //       ),
+  //       child: const Padding(
+  //         padding: EdgeInsets.all(20.0),
+  //         child: Column(
+  //           crossAxisAlignment: CrossAxisAlignment.start,
+  //           children: [
+  //             Row(
+  //               children: [
+  //                 Icon(
+  //                   Icons.tips_and_updates,
+  //                   color: Colors.amber,
+  //                   size: 24,
+  //                 ),
+  //                 SizedBox(width: 8),
+  //                 Text(
+  //                   'Tips Perawatan',
+  //                   style: TextStyle(
+  //                     fontSize: 18,
+  //                     fontWeight: FontWeight.bold,
+  //                     color: Color(0xFF1B1B1B),
+  //                   ),
+  //                 ),
+  //               ],
+  //             ),
+  //             SizedBox(height: 12),
+  //             Text(
+  //               'Pastikan untuk memeriksa kualitas air secara rutin dan lakukan penggantian filter sesuai jadwal untuk menjaga kualitas air tetap optimal.',
+  //               style: TextStyle(
+  //                 fontSize: 14,
+  //                 color: Color(0xFF666666),
+  //                 height: 1.5,
+  //               ),
+  //             ),
+  //           ],
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
 
-  Widget _buildStatusCard() {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            // ignore: deprecated_member_use
-            color: Colors.blue.withOpacity(0.1),
-            spreadRadius: 2,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+Widget _buildStatusCard() {
+  return Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.blue.withOpacity(0.1),
+          spreadRadius: 2,
+          blurRadius: 10,
+          offset: const Offset(0, 4),
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            children: [
-              _buildCircularProgress(),
-              const SizedBox(height: 24),
-              Text(
-                isReplacementDue
-                    ? 'Segera Ganti Filter!'
-                    : 'Filter dalam Kondisi Baik',
+      ],
+    ),
+    child: Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            _buildCircularProgress(),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              decoration: BoxDecoration(
+                color: (isReplacementDue ? Colors.red : Colors.green).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                isReplacementDue ? 'Segera Ganti Filter!' : 'Filter dalam Kondisi Baik',
                 style: TextStyle(
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: isReplacementDue ? Colors.red : Colors.green,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                '$daysRemaining hari sebelum penggantian berikutnya',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF666666),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCircularProgress() {
-    final double progress = daysRemaining / filterDuration.inDays;
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        SizedBox(
-          height: 150,
-          width: 150,
-          child: CircularProgressIndicator(
-            value: progress.clamp(0.0, 1.0), // Memastikan nilai antara 0 dan 1
-            strokeWidth: 12,
-            backgroundColor: Colors.grey.withOpacity(0.2),
-            valueColor: AlwaysStoppedAnimation<Color>(
-              isReplacementDue ? Colors.red : Colors.blue,
-            ),
-          ),
-        ),
-        Column(
-          children: [
-            Text(
-              '$daysRemaining',
-              style: const TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1B1B1B),
-              ),
-            ),
-            const Text(
-              'Hari',
-              style: TextStyle(
-                fontSize: 16,
-                color: Color(0xFF666666),
-              ),
             ),
           ],
         ),
-      ],
-    );
-  }
+      ),
+    ),
+  );
+}
 
+Widget _buildCircularProgress() {
+  final double progress = daysRemaining / filterDuration.inDays;
+  return Stack(
+    alignment: Alignment.center,
+    children: [
+      SizedBox(
+        height: 180,
+        width: 180,
+        child: CircularProgressIndicator(
+          value: progress.clamp(0.0, 1.0),
+          strokeWidth: 16,
+          backgroundColor: Colors.grey.withOpacity(0.2),
+          valueColor: AlwaysStoppedAnimation<Color>(
+            isReplacementDue ? Colors.red : Colors.blue,
+          ),
+        ),
+      ),
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$daysRemaining',
+            style: const TextStyle(
+              fontSize: 36,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1B1B1B),
+            ),
+          ),
+          const Text(
+            'Hari Menuju\nPenggantian Filter',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: Color(0xFF666666),
+              height: 1.2,
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+}
   Widget _buildWaterFlowInfo() {
     final flowProgress = (totalWaterFlow / MAX_WATER_FLOW).clamp(0.0, 1.0);
     final remainingFlow = (MAX_WATER_FLOW - totalWaterFlow).toStringAsFixed(1);
