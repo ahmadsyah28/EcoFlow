@@ -1,10 +1,14 @@
 import 'dart:async';
 
+import 'package:ecoflow/screens/bluetooth_connection_screen.dart';
+import 'package:ecoflow/services/ble_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/bluetooth_service.dart';
 import 'parameter_detail_screen.dart';
+import '../models/ble_models.dart';
 
 class CombinedWaterScreen extends StatefulWidget {
   const CombinedWaterScreen({super.key});
@@ -17,6 +21,8 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
   static const String LAST_REPLACEMENT_KEY = 'last_replacement_date';
   static const String FILTER_DURATION_KEY = 'filter_duration_days';
   static const String TOTAL_FLOW_KEY = 'total_water_flow';
+  StreamSubscription? _connectionSubscription;
+  late WaterQualityBLEService bleService;
   late DateTime lastReplacementDate;
   late Duration filterDuration;
   late WaterQualityBluetoothService bluetoothService;
@@ -86,46 +92,115 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
     super.initState();
     _saveTotalFlow();
     _loadData();
+    _initBLE();
   }
 
-  // Ganti deklarasi bluetoothService
-  void _setupBluetooth() {
-    bluetoothService = WaterQualityBluetoothService(
-      // Update nama class
-      targetDeviceName: 'ESP32_Water_Quality',
+  Future<void> _initBLE() async {
+    bleService = WaterQualityBLEService(
       onDataReceived: _updateSensorData,
     );
-    _connectBluetooth();
+
+   _connectionSubscription =
+    bleService.stateStream.listen((state) {
+      setState(() {
+        isConnected = state == BleConnectionState.connected;
+      });
+
+      if (state == BleConnectionState.disconnected) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Perangkat terputus. Mencoba menghubungkan kembali...'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        _reconnectBLE();
+      }
+    });
+
+    try {
+      await bleService.startScan();
+    } catch (e) {
+      if (mounted) {
+        String errorMessage = 'Error koneksi Bluetooth';
+        if (e.toString().contains('Permissions tidak diberikan')) {
+          errorMessage =
+              'Mohon izinkan akses lokasi dan bluetooth untuk menggunakan fitur ini';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () {
+                openAppSettings();
+              },
+            ),
+          ),
+        );
+      }
+    }
   }
 
-  Future<void> _connectBluetooth() async {
-    await bluetoothService.connect();
-    setState(() {
-      isConnected = bluetoothService.isConnected();
-    });
+  Future<void> _reconnectBLE() async {
+    await Future.delayed(const Duration(seconds: 5)); // Tunggu 5 detik
+    if (mounted && !bleService.isConnected()) {
+      try {
+        await bleService.reconnect();
+      } catch (e) {
+        print('Reconnection error: $e');
+      }
+    }
   }
+
+  // // Ganti deklarasi bluetoothService
+  // void _setupBluetooth() {
+  //   bluetoothService = WaterQualityBluetoothService(
+  //     // Update nama class
+  //     targetDeviceName: 'ESP32_Water_Quality',
+  //     onDataReceived: _updateSensorData,
+  //   );
+  //   _connectBluetooth();
+  // }
+
+  // Future<void> _connectBluetooth() async {
+  //   await bluetoothService.connect();
+  //   setState(() {
+  //     isConnected = bluetoothService.isConnected();
+  //   });
+  // }
 
   void _updateSensorData(Map<String, dynamic> data) {
     setState(() {
+      // Update nilai parameter
       waterParameters['pH']?['value'] = data['ph']?.toDouble() ?? 7.0;
       waterParameters['TDS']?['value'] = data['tds']?.toDouble() ?? 150.0;
-      waterParameters['Temperature']?['value'] =
-          data['temperature']?.toDouble() ?? 25.0;
       waterParameters['Turbidity']?['value'] =
           data['turbidity']?.toDouble() ?? 2.5;
-
-      lastUpdatedTime = DateTime.now();
+      waterParameters['Temperature']?['value'] =
+          data['temperature']?.toDouble() ?? 25.0;
 
       // Update total water flow
       final newFlow = data['flow']?.toDouble() ?? 0.0;
       totalWaterFlow += newFlow;
       _saveTotalFlow();
+
+      // Update timestamp
+      if (data['timestamp'] != null) {
+        lastUpdatedTime = DateTime.parse(data['timestamp']);
+      } else {
+        lastUpdatedTime = DateTime.now();
+      }
     });
   }
 
   @override
   void dispose() {
-    bluetoothService.disconnect();
+    _connectionSubscription?.cancel();
+    bleService.dispose();
     super.dispose();
   }
 
@@ -266,6 +341,22 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
     );
   }
 
+  void _connectBluetooth() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const BluetoothConnectionScreen(),
+      ),
+    );
+
+    if (result != null && result is WaterQualityBLEService) {
+      setState(() {
+        bleService = result;
+        isConnected = bleService.isConnected();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -293,15 +384,46 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
         ),
         actions: [
           // Status Bluetooth
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Icon(
-              isConnected
-                  ? Icons.bluetooth_connected
-                  : Icons.bluetooth_disabled,
-              color: isConnected ? Colors.blue : Colors.grey,
+          InkWell(
+            onTap: _connectBluetooth,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: isConnected
+                    ? Colors.green.withOpacity(0.1)
+                    : Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+                    color: isConnected ? Colors.green : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    isConnected ? 'Terhubung' : 'Hubungkan',
+                    style: TextStyle(
+                      color: isConnected ? Colors.green : Colors.grey,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          // Padding(
+          //   padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          //   child: Icon(
+          //     isConnected
+          //         ? Icons.bluetooth_connected
+          //         : Icons.bluetooth_disabled,
+          //     color: isConnected ? Colors.blue : Colors.grey,
+          //   ),
+          // ),
 
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.grey),
@@ -344,7 +466,7 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
     );
   }
 
-Widget _buildWaterQualityStatus() {
+  Widget _buildWaterQualityStatus() {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -371,7 +493,8 @@ Widget _buildWaterQualityStatus() {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -447,22 +570,30 @@ Widget _buildWaterQualityStatus() {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildParameterItem('pH', waterParameters['pH']!['value'].toString(), ''),
-                        _buildParameterItem('TDS', waterParameters['TDS']!['value'].toString(), 'ppm'),
+                        _buildParameterItem('pH',
+                            waterParameters['pH']!['value'].toString(), ''),
+                        _buildParameterItem('TDS',
+                            waterParameters['TDS']!['value'].toString(), 'ppm'),
                       ],
                     ),
                     const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildParameterItem('Turbidity', waterParameters['Turbidity']!['value'].toString(), 'NTU'),
-                        _buildParameterItem('Suhu', waterParameters['Temperature']!['value'].toString(), '°C'),
+                        _buildParameterItem(
+                            'Turbidity',
+                            waterParameters['Turbidity']!['value'].toString(),
+                            'NTU'),
+                        _buildParameterItem(
+                            'Suhu',
+                            waterParameters['Temperature']!['value'].toString(),
+                            '°C'),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Row(
+                    const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
+                      children: [
                         Text(
                           'Tekan untuk detail lengkap',
                           style: TextStyle(
@@ -486,7 +617,8 @@ Widget _buildWaterQualityStatus() {
         ),
       ),
     );
-  }  // Tambahkan widget helper untuk parameter item
+  } // Tambahkan widget helper untuk parameter item
+
   Widget _buildParameterItem(String label, String value, String unit) {
     return Column(
       children: [
@@ -526,77 +658,77 @@ Widget _buildWaterQualityStatus() {
     );
   }
 
-  Widget _buildParametersGrid() {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 1.1,
-      ),
-      itemCount: waterParameters.length,
-      itemBuilder: (context, index) {
-        final parameter = waterParameters.entries.elementAt(index);
-        final value = parameter.value['value'];
-        final isNormal = value >= parameter.value['minRange'] &&
-            value <= parameter.value['maxRange'];
+  // Widget _buildParametersGrid() {
+  //   return GridView.builder(
+  //     shrinkWrap: true,
+  //     physics: const NeverScrollableScrollPhysics(),
+  //     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+  //       crossAxisCount: 2,
+  //       crossAxisSpacing: 16,
+  //       mainAxisSpacing: 16,
+  //       childAspectRatio: 1.1,
+  //     ),
+  //     itemCount: waterParameters.length,
+  //     itemBuilder: (context, index) {
+  //       final parameter = waterParameters.entries.elementAt(index);
+  //       final value = parameter.value['value'];
+  //       final isNormal = value >= parameter.value['minRange'] &&
+  //           value <= parameter.value['maxRange'];
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.blue.withOpacity(0.1),
-                spreadRadius: 2,
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  parameter.value['icon'],
-                  color: isNormal ? Colors.blue : Colors.red,
-                  size: 32,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  parameter.key,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$value${parameter.value['unit']}',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isNormal ? Colors.blue : Colors.red,
-                  ),
-                ),
-                Text(
-                  'Normal: ${parameter.value['minRange']}-${parameter.value['maxRange']}${parameter.value['unit']}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
+  //       return Container(
+  //         decoration: BoxDecoration(
+  //           color: Colors.white,
+  //           borderRadius: BorderRadius.circular(16),
+  //           boxShadow: [
+  //             BoxShadow(
+  //               color: Colors.blue.withOpacity(0.1),
+  //               spreadRadius: 2,
+  //               blurRadius: 10,
+  //               offset: const Offset(0, 4),
+  //             ),
+  //           ],
+  //         ),
+  //         child: Padding(
+  //           padding: const EdgeInsets.all(16.0),
+  //           child: Column(
+  //             mainAxisAlignment: MainAxisAlignment.center,
+  //             children: [
+  //               Icon(
+  //                 parameter.value['icon'],
+  //                 color: isNormal ? Colors.blue : Colors.red,
+  //                 size: 32,
+  //               ),
+  //               const SizedBox(height: 8),
+  //               Text(
+  //                 parameter.key,
+  //                 style: const TextStyle(
+  //                   fontSize: 16,
+  //                   fontWeight: FontWeight.bold,
+  //                 ),
+  //               ),
+  //               const SizedBox(height: 4),
+  //               Text(
+  //                 '$value${parameter.value['unit']}',
+  //                 style: TextStyle(
+  //                   fontSize: 20,
+  //                   fontWeight: FontWeight.bold,
+  //                   color: isNormal ? Colors.blue : Colors.red,
+  //                 ),
+  //               ),
+  //               Text(
+  //                 'Normal: ${parameter.value['minRange']}-${parameter.value['maxRange']}${parameter.value['unit']}',
+  //                 style: const TextStyle(
+  //                   fontSize: 12,
+  //                   color: Colors.grey,
+  //                 ),
+  //               ),
+  //             ],
+  //           ),
+  //         ),
+  //       );
+  //     },
+  //   );
+  // }
 
   // ... (other existing widget methods remain the same)
 
@@ -794,94 +926,99 @@ Widget _buildWaterQualityStatus() {
   //   );
   // }
 
-Widget _buildStatusCard() {
-  return Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(16),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.blue.withOpacity(0.1),
-          spreadRadius: 2,
-          blurRadius: 10,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    child: Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
+  Widget _buildStatusCard() {
+    return Container(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.withOpacity(0.1),
+            spreadRadius: 2,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            _buildCircularProgress(),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              decoration: BoxDecoration(
-                color: (isReplacementDue ? Colors.red : Colors.green).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                isReplacementDue ? 'Segera Ganti Filter!' : 'Filter dalam Kondisi Baik',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: isReplacementDue ? Colors.red : Colors.green,
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            children: [
+              _buildCircularProgress(),
+              const SizedBox(height: 16),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: (isReplacementDue ? Colors.red : Colors.green)
+                      .withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                child: Text(
+                  isReplacementDue
+                      ? 'Segera Ganti Filter!'
+                      : 'Filter dalam Kondisi Baik',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isReplacementDue ? Colors.red : Colors.green,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCircularProgress() {
+    final double progress = daysRemaining / filterDuration.inDays;
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        SizedBox(
+          height: 180,
+          width: 180,
+          child: CircularProgressIndicator(
+            value: progress.clamp(0.0, 1.0),
+            strokeWidth: 16,
+            backgroundColor: Colors.grey.withOpacity(0.2),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              isReplacementDue ? Colors.red : Colors.blue,
+            ),
+          ),
+        ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$daysRemaining',
+              style: const TextStyle(
+                fontSize: 36,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1B1B1B),
+              ),
+            ),
+            const Text(
+              'Hari Menuju\nPenggantian Filter',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFF666666),
+                height: 1.2,
               ),
             ),
           ],
         ),
-      ),
-    ),
-  );
-}
+      ],
+    );
+  }
 
-Widget _buildCircularProgress() {
-  final double progress = daysRemaining / filterDuration.inDays;
-  return Stack(
-    alignment: Alignment.center,
-    children: [
-      SizedBox(
-        height: 180,
-        width: 180,
-        child: CircularProgressIndicator(
-          value: progress.clamp(0.0, 1.0),
-          strokeWidth: 16,
-          backgroundColor: Colors.grey.withOpacity(0.2),
-          valueColor: AlwaysStoppedAnimation<Color>(
-            isReplacementDue ? Colors.red : Colors.blue,
-          ),
-        ),
-      ),
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$daysRemaining',
-            style: const TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1B1B1B),
-            ),
-          ),
-          const Text(
-            'Hari Menuju\nPenggantian Filter',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: Color(0xFF666666),
-              height: 1.2,
-            ),
-          ),
-        ],
-      ),
-    ],
-  );
-}
   Widget _buildWaterFlowInfo() {
     final flowProgress = (totalWaterFlow / MAX_WATER_FLOW).clamp(0.0, 1.0);
     final remainingFlow = (MAX_WATER_FLOW - totalWaterFlow).toStringAsFixed(1);
