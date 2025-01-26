@@ -1,26 +1,33 @@
+// water_quality_service.dart
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import '../models/water_quality.dart';
+import 'package:web_socket_channel/io.dart';
 
 class WaterQualityService {
-  final String baseUrl;
-  
-  WaterQualityService({required this.baseUrl});
+ final _channel = IOWebSocketChannel.connect('ws://192.168.4.1:81');
+ Function(Map<String, dynamic>)? onDataReceived;
+ bool _isConnected = false;
 
-  Future<WaterQuality> getCurrentReadings() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/sensor-readings'),
-        headers: {'Content-Type': 'application/json'},
-      );
+ bool isConnected() => _isConnected;
 
-      if (response.statusCode == 200) {
-        return WaterQuality.fromJson(json.decode(response.body));
-      } else {
-        throw Exception('Failed to load sensor data: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Error connecting to sensor: $e');
-    }
-  }
+ void connect() {
+   _channel.stream.listen(
+     (message) {
+       _isConnected = true;
+       final data = jsonDecode(message);
+       onDataReceived?.call(data);
+     },
+     onError: (error) {
+       print('Error: $error');
+       _isConnected = false;
+     },
+     onDone: () {
+       print('Connection closed');
+       _isConnected = false;
+     },
+   );
+ }
+
+ void dispose() {
+   _channel.sink.close();
+ }
 }
