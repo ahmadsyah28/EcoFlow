@@ -24,7 +24,7 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
   DateTime lastUpdatedTime = DateTime.now();
   bool isConnected = false;
 
-  static const double MAX_WATER_FLOW = 1000.0;
+  static const double MAX_WATER_FLOW = 21000.0;
   double totalWaterFlow = 0.0;
 
   // Add water quality parameters
@@ -32,21 +32,21 @@ class _CombinedWaterScreenState extends State<CombinedWaterScreen> {
     'pH': {
       'value': 7.0,
       'minRange': 6.5,
-      'maxRange': 7.5,
+      'maxRange': 8.5,
       'unit': '',
       'icon': Icons.science,
     },
     'TDS': {
       'value': 150.0,
       'minRange': 0,
-      'maxRange': 500,
+      'maxRange': 1500,
       'unit': 'ppm',
       'icon': Icons.opacity,
     },
     'Turbidity': {
       'value': 2.5,
       'minRange': 0,
-      'maxRange': 5,
+      'maxRange': 25,
       'unit': 'NTU',
       'icon': Icons.water_drop,
     },
